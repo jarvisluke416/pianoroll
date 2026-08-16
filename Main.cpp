@@ -1,5 +1,11 @@
+#ifndef UNICODE
 #define UNICODE
+#endif
+
+#ifndef _UNICODE
 #define _UNICODE
+#endif
+
 #include <windows.h>
 #include <mmsystem.h>
 #include <cmath>
@@ -8,8 +14,7 @@
 #include <sstream>
 #include <algorithm>
 #include <thread>
-#include <mutex>
-#include <memory>
+#include <cstring>
 
 #pragma comment(lib, "winmm.lib")
 
@@ -23,8 +28,7 @@ constexpr int SAMPLE_RATE = 44100;
 constexpr double NOTE_LENGTH = 0.45;
 constexpr double PI = 3.14159265358979323846;
 
-// 5X volume boost requested.
-// The final sample is clipped to the valid 16-bit range.
+// 5X volume boost.
 constexpr double VOLUME_BOOST = 5.0;
 
 // ============================================================
@@ -47,7 +51,7 @@ enum class Instrument
     FLUTE,
     ORGAN,
     BELL,
-    STRINGS,
+    GUITAR,
     SYNTH
 };
 
@@ -57,7 +61,7 @@ const std::vector<std::wstring> instrumentNames =
     L"FLUTE",
     L"ORGAN",
     L"BELL",
-    L"STRINGS",
+    L"GUITAR",
     L"SYNTH"
 };
 
@@ -85,13 +89,6 @@ std::vector<PianoKey> keys;
 // ============================================================
 // NOTE POSITION
 // ============================================================
-
-// This is the important update.
-//
-// The first played note is position 0.
-// The second is position 1.
-// The third is position 2.
-// etc.
 
 int notePosition = 0;
 
@@ -155,7 +152,8 @@ std::wstring MidiToNoteName(int midi)
 
 bool IsBlackKey(int midi)
 {
-    int note = midi % 12;
+    int note =
+        midi % 12;
 
     return
         note == 1 ||
@@ -173,12 +171,8 @@ void CreateKeys()
 {
     keys.clear();
 
-    // Piano range:
-    //
     // A0 = MIDI 21
     // C8 = MIDI 108
-    //
-    // 108 - 21 + 1 = 88 keys
 
     for (int midi = 21;
          midi <= 108;
@@ -204,7 +198,8 @@ void CreateKeys()
                 midi
             );
 
-        key.pressed = false;
+        key.pressed =
+            false;
 
         keys.push_back(
             key
@@ -220,8 +215,10 @@ PianoKey* FindKeyAt(
     int x,
     int y)
 {
-    // Check black keys first because
+    // Black keys first because
     // they sit on top of white keys.
+
+    POINT point{ x, y };
 
     for (PianoKey& key : keys)
     {
@@ -230,13 +227,13 @@ PianoKey* FindKeyAt(
 
         if (PtInRect(
                 &key.rect,
-                POINT{ x, y }))
+                point))
         {
             return &key;
         }
     }
 
-    // Then check white keys.
+    // White keys.
 
     for (PianoKey& key : keys)
     {
@@ -245,7 +242,7 @@ PianoKey* FindKeyAt(
 
         if (PtInRect(
                 &key.rect,
-                POINT{ x, y }))
+                point))
         {
             return &key;
         }
@@ -255,7 +252,7 @@ PianoKey* FindKeyAt(
 }
 
 // ============================================================
-// WAVEFORM HELPERS
+// WAVEFORM
 // ============================================================
 
 double Sine(double phase)
@@ -337,7 +334,6 @@ double GenerateInstrumentSample(
                 0.35 * Sine(phase * 3.02) +
                 0.20 * Sine(phase * 4.17);
 
-            // Bell naturally fades faster.
             value *=
                 std::exp(-3.5 * t);
 
@@ -345,10 +341,10 @@ double GenerateInstrumentSample(
         }
 
         // ----------------------------------------------------
-        // STRINGS
+        // GUITAR
         // ----------------------------------------------------
 
-        case Instrument::STRINGS:
+        case Instrument::GUITAR:
         {
             double vibrato =
                 0.003 *
@@ -356,15 +352,15 @@ double GenerateInstrumentSample(
                     2.0 * PI * 5.0 * t
                 );
 
-            double stringPhase =
+            double guitarPhase =
                 frequency *
                 (1.0 + vibrato) *
                 t;
 
             value =
-                0.65 * Sine(stringPhase) +
-                0.30 * Sine(stringPhase * 2.0) +
-                0.15 * Sine(stringPhase * 3.0);
+                0.65 * Sine(guitarPhase) +
+                0.30 * Sine(guitarPhase * 2.0) +
+                0.15 * Sine(guitarPhase * 3.0);
 
             break;
         }
@@ -375,8 +371,6 @@ double GenerateInstrumentSample(
 
         case Instrument::SYNTH:
         {
-            // Saw-like waveform made from harmonics.
-
             for (int harmonic = 1;
                  harmonic <= 8;
                  ++harmonic)
@@ -384,8 +378,7 @@ double GenerateInstrumentSample(
                 value +=
                     (1.0 / harmonic) *
                     Sine(
-                        phase *
-                        harmonic
+                        phase * harmonic
                     );
             }
 
@@ -429,7 +422,7 @@ void PlayNoteSound(
 
                 double envelope = 1.0;
 
-                // Quick attack.
+                // Attack.
                 if (t < 0.015)
                 {
                     envelope =
@@ -464,7 +457,7 @@ void PlayNoteSound(
                 value *=
                     envelope;
 
-                // Requested 5X boost.
+                // 5X volume boost.
                 value *=
                     VOLUME_BOOST;
 
@@ -484,12 +477,14 @@ void PlayNoteSound(
             format.wFormatTag =
                 WAVE_FORMAT_PCM;
 
-            format.nChannels = 1;
+            format.nChannels =
+                1;
 
             format.nSamplesPerSec =
                 SAMPLE_RATE;
 
-            format.wBitsPerSample = 16;
+            format.wBitsPerSample =
+                16;
 
             format.nBlockAlign =
                 format.nChannels *
@@ -590,18 +585,6 @@ void PrintNote(
             )
         ];
 
-    // IMPORTANT:
-    //
-    // The format is:
-    //
-    // INSTRUMENT NOTE POSITION DURATION
-    //
-    // Example:
-    //
-    // FLUTE D#2 0 1
-    // FLUTE F2 1 1
-    // FLUTE A#2 2 1
-
     std::wstringstream line;
 
     line
@@ -623,13 +606,17 @@ void PrintNote(
     if (length > 0)
     {
         existing.resize(
-            length
+            length + 1
         );
 
         GetWindowTextW(
             outputEditor,
-            &existing[0],
+            existing.data(),
             length + 1
+        );
+
+        existing.resize(
+            length
         );
     }
 
@@ -641,7 +628,7 @@ void PrintNote(
         existing.c_str()
     );
 
-    // Move to the newest note.
+    // Move cursor to newest note.
     SendMessageW(
         outputEditor,
         EM_SETSEL,
@@ -653,8 +640,7 @@ void PrintNote(
         )
     );
 
-    // Advance the position for
-    // the NEXT note.
+    // Advance position for next note.
     ++notePosition;
 }
 
@@ -680,11 +666,12 @@ void ResizePiano()
     int height =
         rect.bottom;
 
-    // Piano starts below the controls.
     int pianoTop = 165;
 
     int pianoHeight =
-        height - pianoTop - 15;
+        height -
+        pianoTop -
+        15;
 
     if (pianoHeight < 100)
         pianoHeight = 100;
@@ -692,9 +679,7 @@ void ResizePiano()
     int rowHeight =
         pianoHeight / 2;
 
-    // --------------------------------------------------------
     // Two rows of 44 keys.
-    // --------------------------------------------------------
 
     for (size_t i = 0;
          i < keys.size();
@@ -719,7 +704,6 @@ void ResizePiano()
                 )
             );
 
-        // Count white keys in this row.
         int whiteCount = 0;
 
         for (int j = rowStart;
@@ -739,8 +723,6 @@ void ResizePiano()
                 width / whiteCount
             );
 
-        // Determine the white-key index
-        // of this key within its row.
         int whiteIndex = 0;
 
         for (int j = rowStart;
@@ -768,7 +750,6 @@ void ResizePiano()
                 (whiteIndex + 1) *
                 whiteWidth;
 
-            // Make final key reach the edge.
             if (whiteIndex ==
                 whiteCount - 1)
             {
@@ -785,20 +766,6 @@ void ResizePiano()
         }
         else
         {
-            // Black keys are positioned between
-            // their neighboring white keys.
-
-            int note =
-                key.midiNote % 12;
-
-            int previousWhiteIndex =
-                whiteIndex - 1;
-
-            // For black keys, whiteIndex is
-            // the number of whites before it.
-            //
-            // Place it centered at the boundary.
-
             double center =
                 static_cast<double>(
                     whiteIndex *
@@ -824,7 +791,6 @@ void ResizePiano()
             int blackHeight =
                 rowHeight * 58 / 100;
 
-            // Keep inside row.
             if (left < 0)
                 left = 0;
 
@@ -838,9 +804,6 @@ void ResizePiano()
                 right,
                 top + blackHeight
             };
-
-            (void)previousWhiteIndex;
-            (void)note;
         }
     }
 
@@ -859,6 +822,7 @@ void DrawPiano(
     HDC hdc)
 {
     // White keys first.
+
     for (PianoKey& key : keys)
     {
         if (key.black)
@@ -891,7 +855,6 @@ void DrawPiano(
             )
         );
 
-        // Note name at bottom.
         SetBkMode(
             hdc,
             TRANSPARENT
@@ -907,7 +870,8 @@ void DrawPiano(
 
         textRect.top +=
             (textRect.bottom -
-             textRect.top) - 25;
+             textRect.top) -
+            25;
 
         DrawTextW(
             hdc,
@@ -920,8 +884,8 @@ void DrawPiano(
         );
     }
 
-    // Black keys second so they appear
-    // on top of white keys.
+    // Black keys second.
+
     for (PianoKey& key : keys)
     {
         if (!key.black)
@@ -1029,13 +993,17 @@ void CopyOutput()
     std::wstring text;
 
     text.resize(
-        length
+        length + 1
     );
 
     GetWindowTextW(
         outputEditor,
-        &text[0],
+        text.data(),
         length + 1
+    );
+
+    text.resize(
+        length
     );
 
     if (!OpenClipboard(
@@ -1065,7 +1033,7 @@ void CopyOutput()
 
         if (data != nullptr)
         {
-            memcpy(
+            std::memcpy(
                 data,
                 text.c_str(),
                 bytes
@@ -1124,12 +1092,8 @@ LRESULT CALLBACK WindowProc(
                     220,
                     35,
                     window,
-                    reinterpret_cast<HMENU>(
-                        1001
-                    ),
-                    GetModuleHandleW(
-                        nullptr
-                    ),
+                    reinterpret_cast<HMENU>(1001),
+                    GetModuleHandleW(nullptr),
                     nullptr
                 );
 
@@ -1145,12 +1109,8 @@ LRESULT CALLBACK WindowProc(
                     100,
                     35,
                     window,
-                    reinterpret_cast<HMENU>(
-                        1002
-                    ),
-                    GetModuleHandleW(
-                        nullptr
-                    ),
+                    reinterpret_cast<HMENU>(1002),
+                    GetModuleHandleW(nullptr),
                     nullptr
                 );
 
@@ -1166,12 +1126,8 @@ LRESULT CALLBACK WindowProc(
                     100,
                     35,
                     window,
-                    reinterpret_cast<HMENU>(
-                        1003
-                    ),
-                    GetModuleHandleW(
-                        nullptr
-                    ),
+                    reinterpret_cast<HMENU>(1003),
+                    GetModuleHandleW(nullptr),
                     nullptr
                 );
 
@@ -1192,12 +1148,8 @@ LRESULT CALLBACK WindowProc(
                     400,
                     75,
                     window,
-                    reinterpret_cast<HMENU>(
-                        1004
-                    ),
-                    GetModuleHandleW(
-                        nullptr
-                    ),
+                    reinterpret_cast<HMENU>(1004),
+                    GetModuleHandleW(nullptr),
                     nullptr
                 );
 
@@ -1216,7 +1168,7 @@ LRESULT CALLBACK WindowProc(
         }
 
         // ====================================================
-        // BUTTON
+        // BUTTONS
         // ====================================================
 
         case WM_COMMAND:
@@ -1269,7 +1221,7 @@ LRESULT CALLBACK WindowProc(
         }
 
         // ====================================================
-        // LEFT MOUSE
+        // LEFT MOUSE DOWN
         // ====================================================
 
         case WM_LBUTTONDOWN:
@@ -1296,23 +1248,18 @@ LRESULT CALLBACK WindowProc(
 
             if (key != nullptr)
             {
-                for (PianoKey& current :
-                     keys)
+                for (PianoKey& current : keys)
                 {
-                    current.pressed =
-                        false;
+                    current.pressed = false;
                 }
 
-                key->pressed =
-                    true;
+                key->pressed = true;
 
-                // Play the note.
                 PlayNoteSound(
                     key->frequency,
                     currentInstrument
                 );
 
-                // Print the note.
                 PrintNote(
                     *key
                 );
@@ -1364,20 +1311,14 @@ LRESULT CALLBACK WindowProc(
 
                 if (key != nullptr)
                 {
-                    // Only trigger when moving
-                    // onto a different key.
-
                     if (!key->pressed)
                     {
-                        for (PianoKey& current :
-                             keys)
+                        for (PianoKey& current : keys)
                         {
-                            current.pressed =
-                                false;
+                            current.pressed = false;
                         }
 
-                        key->pressed =
-                            true;
+                        key->pressed = true;
 
                         PlayNoteSound(
                             key->frequency,
@@ -1408,11 +1349,9 @@ LRESULT CALLBACK WindowProc(
         {
             ReleaseCapture();
 
-            for (PianoKey& key :
-                 keys)
+            for (PianoKey& key : keys)
             {
-                key.pressed =
-                    false;
+                key.pressed = false;
             }
 
             InvalidateRect(
@@ -1472,6 +1411,7 @@ LRESULT CALLBACK WindowProc(
             );
 
             // Title.
+
             SetBkMode(
                 hdc,
                 TRANSPARENT
@@ -1500,7 +1440,8 @@ LRESULT CALLBACK WindowProc(
                 DT_VCENTER
             );
 
-            // Small information text.
+            // Information text.
+
             RECT infoRect =
             {
                 15,
@@ -1545,9 +1486,7 @@ LRESULT CALLBACK WindowProc(
 
         case WM_DESTROY:
         {
-            PostQuitMessage(
-                0
-            );
+            PostQuitMessage(0);
 
             return 0;
         }
@@ -1564,11 +1503,19 @@ LRESULT CALLBACK WindowProc(
 // ============================================================
 // MAIN
 // ============================================================
+//
+// IMPORTANT:
+// Because you compile with:
+//
+//     -municode
+//
+// MinGW expects wWinMain, not WinMain.
+// ============================================================
 
-int WINAPI WinMain(
+int WINAPI wWinMain(
     HINSTANCE hInstance,
     HINSTANCE,
-    LPSTR,
+    PWSTR,
     int nCmdShow)
 {
     const wchar_t CLASS_NAME[] =
@@ -1584,6 +1531,10 @@ int WINAPI WinMain(
 
     wc.lpszClassName =
         CLASS_NAME;
+
+    // IMPORTANT:
+    // Do NOT use MAKEINTRESOURCEW(IDC_ARROW).
+    // IDC_ARROW is already correct for LoadCursorW.
 
     wc.hCursor =
         LoadCursorW(
