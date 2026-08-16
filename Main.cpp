@@ -1,229 +1,122 @@
-#define WIN32_LEAN_AND_MEAN
-
+#define UNICODE
+#define _UNICODE
 #include <windows.h>
 #include <mmsystem.h>
-
-#include <algorithm>
 #include <cmath>
-#include <cstring>
-#include <sstream>
-#include <string>
-#include <thread>
 #include <vector>
+#include <string>
+#include <sstream>
+#include <algorithm>
+#include <thread>
+#include <mutex>
+#include <memory>
 
 #pragma comment(lib, "winmm.lib")
 
 // ============================================================
-// CONSTANTS
+// SETTINGS
 // ============================================================
 
-constexpr int NUM_KEYS = 88;
-constexpr int FIRST_MIDI = 21;
-constexpr int LAST_MIDI = 108;
+constexpr int TOTAL_KEYS = 88;
 
 constexpr int SAMPLE_RATE = 44100;
-constexpr double NOTE_LENGTH = 0.8;
+constexpr double NOTE_LENGTH = 0.45;
+constexpr double PI = 3.14159265358979323846;
+
+// 5X volume boost requested.
+// The final sample is clipped to the valid 16-bit range.
 constexpr double VOLUME_BOOST = 5.0;
 
 // ============================================================
-// GLOBALS
+// GLOBAL WINDOW
 // ============================================================
 
 HWND mainWindow = nullptr;
-
 HWND instrumentButton = nullptr;
 HWND clearButton = nullptr;
 HWND copyButton = nullptr;
 HWND outputEditor = nullptr;
 
-int selectedInstrument = 0;
+// ============================================================
+// INSTRUMENTS
+// ============================================================
+
+enum class Instrument
+{
+    PIANO,
+    FLUTE,
+    ORGAN,
+    BELL,
+    STRINGS,
+    SYNTH
+};
+
+const std::vector<std::wstring> instrumentNames =
+{
+    L"PIANO",
+    L"FLUTE",
+    L"ORGAN",
+    L"BELL",
+    L"STRINGS",
+    L"SYNTH"
+};
+
+Instrument currentInstrument = Instrument::FLUTE;
+
+// ============================================================
+// PIANO KEY
+// ============================================================
 
 struct PianoKey
 {
-    int midiNote;
-    double frequency;
+    int midiNote = 0;
 
-    RECT rect;
+    std::wstring noteName;
+    double frequency = 0.0;
 
-    bool black;
-    bool pressed;
+    bool black = false;
+    bool pressed = false;
+
+    RECT rect{};
 };
 
 std::vector<PianoKey> keys;
 
 // ============================================================
-// INSTRUMENT NAMES
+// NOTE POSITION
 // ============================================================
 
-const char* instrumentNames[128] =
+// This is the important update.
+//
+// The first played note is position 0.
+// The second is position 1.
+// The third is position 2.
+// etc.
+
+int notePosition = 0;
+
+// ============================================================
+// MIDI NOTE NAMES
+// ============================================================
+
+const wchar_t* noteNames[12] =
 {
-    "PIANO",
-    "BRIGHTPIANO",
-    "ELECTRICGRAND",
-    "HONKYTONK",
-    "EPIANO1",
-    "EPIANO2",
-    "HARPSICHORD",
-    "CLAVINET",
-
-    "CELESTA",
-    "GLOCKENSPIEL",
-    "MUSICBOX",
-    "VIBRAPHONE",
-    "MARIMBA",
-    "XYLOPHONE",
-    "TUBULARBELLS",
-    "DULCIMER",
-
-    "ORGAN",
-    "PERCORGAN",
-    "ROCKORGAN",
-    "CHURCHORGAN",
-    "REEDORGAN",
-    "ACCORDION",
-    "HARMONICA",
-    "TANGOACCORDION",
-
-    "NYLONGUITAR",
-    "STEELGUITAR",
-    "JAZZGUITAR",
-    "CLEANGUITAR",
-    "MUTEDGUITAR",
-    "OVERDRIVE",
-    "DISTORTION",
-    "GUITARHARMONICS",
-
-    "ACOUSTICBASS",
-    "FINGERBASS",
-    "PICKBASS",
-    "FRETLESSBASS",
-    "SLAPBASS1",
-    "SLAPBASS2",
-    "SYNTHBASS1",
-    "SYNTHBASS2",
-
-    "VIOLIN",
-    "VIOLA",
-    "CELLO",
-    "CONTRABASS",
-    "TREMOLOSTRINGS",
-    "PIZZICATO",
-    "HARP",
-    "TIMPANI",
-
-    "STRINGENSEMBLE1",
-    "STRINGENSEMBLE2",
-    "SYNTHSTRINGS1",
-    "SYNTHSTRINGS2",
-    "CHOIR",
-    "VOICE",
-    "SYNTHCHOIR",
-    "ORCHESTRAHIT",
-
-    "TRUMPET",
-    "TROMBONE",
-    "TUBA",
-    "MUTEDTRUMPET",
-    "FRENCHHORN",
-    "BRASS",
-    "SYNTHBRASS1",
-    "SYNTHBRASS2",
-
-    "SOPRANOSAX",
-    "ALTOSAX",
-    "TENORSAX",
-    "BARITONESAX",
-    "OBOE",
-    "ENGLISHHORN",
-    "BASSOON",
-    "CLARINET",
-
-    "PICCOLO",
-    "FLUTE",
-    "RECORDER",
-    "PANFLUTE",
-    "BLOWNBOTTLE",
-    "SHAKUHACHI",
-    "WHISTLE",
-    "OCARINA",
-
-    "LEADSQUARE",
-    "LEADSAW",
-    "LEADCALLIOPE",
-    "LEADCHIFF",
-    "LEADCHARANG",
-    "LEADVOICE",
-    "LEADFIFTHS",
-    "LEADBASS",
-
-    "PADNEWAGE",
-    "PADWARM",
-    "PADPOLYSYNTH",
-    "PADCHOIR",
-    "PADBOWED",
-    "PADMETALLIC",
-    "PADHALO",
-    "PADSWEEP",
-
-    "FXRAIN",
-    "FXSOUNDTRACK",
-    "FXCRYSTAL",
-    "FXATMOSPHERE",
-    "FXBRIGHTNESS",
-    "FXGOBLINS",
-    "FXECHOES",
-    "FXSCIFI",
-
-    "SITAR",
-    "BANJO",
-    "SHAMISEN",
-    "KOTO",
-    "KALIMBA",
-    "BAGPIPE",
-    "FIDDLE",
-    "SHANAI",
-
-    "TINKLEBELL",
-    "AGOGO",
-    "STEELDRUMS",
-    "WOODBLOCK",
-    "TAIKODRUM",
-    "MELODIC TOM",
-    "SYNTHDRUM",
-    "REVERSECYMBAL",
-
-    "GUITARFRETNOISE",
-    "BREATHNOISE",
-    "SEASHORE",
-    "BIRDTWEET",
-    "TELEPHONERING",
-    "HELICOPTER",
-    "APPLAUSE",
-    "GUNSHOT"
+    L"C",
+    L"C#",
+    L"D",
+    L"D#",
+    L"E",
+    L"F",
+    L"F#",
+    L"G",
+    L"G#",
+    L"A",
+    L"A#",
+    L"B"
 };
 
 // ============================================================
-// NOTE NAMES
-// ============================================================
-
-const char* noteNames[12] =
-{
-    "C",
-    "C#",
-    "D",
-    "D#",
-    "E",
-    "F",
-    "F#",
-    "G",
-    "G#",
-    "A",
-    "A#",
-    "B"
-};
-
-// ============================================================
-// MIDI TO FREQUENCY
+// MIDI -> FREQUENCY
 // ============================================================
 
 double MidiToFrequency(int midi)
@@ -231,26 +124,27 @@ double MidiToFrequency(int midi)
     return 440.0 *
         std::pow(
             2.0,
-            (static_cast<double>(midi) - 69.0) / 12.0
+            (midi - 69) / 12.0
         );
 }
 
 // ============================================================
-// MIDI NOTE NAME
+// MIDI -> NOTE NAME
 // ============================================================
 
-std::string GetNoteName(int midi)
+std::wstring MidiToNoteName(int midi)
 {
-    int noteIndex = midi % 12;
-
     int octave =
         (midi / 12) - 1;
 
-    std::string result =
-        noteNames[noteIndex];
+    int note =
+        midi % 12;
+
+    std::wstring result =
+        noteNames[note];
 
     result +=
-        std::to_string(octave);
+        std::to_wstring(octave);
 
     return result;
 }
@@ -275,235 +169,60 @@ bool IsBlackKey(int midi)
 // CREATE 88 KEYS
 // ============================================================
 
-void CreatePiano()
+void CreateKeys()
 {
     keys.clear();
 
-    for (int midi = FIRST_MIDI;
-         midi <= LAST_MIDI;
+    // Piano range:
+    //
+    // A0 = MIDI 21
+    // C8 = MIDI 108
+    //
+    // 108 - 21 + 1 = 88 keys
+
+    for (int midi = 21;
+         midi <= 108;
          ++midi)
     {
-        PianoKey key{};
+        PianoKey key;
 
-        key.midiNote = midi;
-        key.frequency = MidiToFrequency(midi);
-        key.black = IsBlackKey(midi);
+        key.midiNote =
+            midi;
+
+        key.noteName =
+            MidiToNoteName(
+                midi
+            );
+
+        key.frequency =
+            MidiToFrequency(
+                midi
+            );
+
+        key.black =
+            IsBlackKey(
+                midi
+            );
+
         key.pressed = false;
 
-        keys.push_back(key);
-    }
-}
-
-// ============================================================
-// LAYOUT ONE ROW
-//
-// This is the important part for the black-key positions.
-//
-// White keys are laid out first.
-// Black keys are then placed exactly on the boundaries
-// between their neighboring white keys.
-// ============================================================
-
-void LayoutRow(
-    int firstKey,
-    int lastKey,
-    int top,
-    int bottom,
-    int windowWidth)
-{
-    const int margin = 10;
-
-    int usableWidth =
-        windowWidth - margin * 2;
-
-    if (usableWidth < 100)
-        usableWidth = 100;
-
-    // --------------------------------------------------------
-    // Count white keys
-    // --------------------------------------------------------
-
-    int whiteCount = 0;
-
-    for (int i = firstKey;
-         i <= lastKey;
-         ++i)
-    {
-        if (!keys[i].black)
-            ++whiteCount;
-    }
-
-    if (whiteCount == 0)
-        return;
-
-    double whiteWidth =
-        static_cast<double>(usableWidth) /
-        static_cast<double>(whiteCount);
-
-    // --------------------------------------------------------
-    // Position white keys
-    // --------------------------------------------------------
-
-    int whiteIndex = 0;
-
-    for (int i = firstKey;
-         i <= lastKey;
-         ++i)
-    {
-        if (keys[i].black)
-            continue;
-
-        int left =
-            margin +
-            static_cast<int>(
-                whiteIndex * whiteWidth
-            );
-
-        int right =
-            margin +
-            static_cast<int>(
-                (whiteIndex + 1) * whiteWidth
-            );
-
-        keys[i].rect.left = left;
-        keys[i].rect.right = right;
-        keys[i].rect.top = top;
-        keys[i].rect.bottom = bottom;
-
-        ++whiteIndex;
-    }
-
-    // --------------------------------------------------------
-    // Position black keys
-    // --------------------------------------------------------
-
-    int blackWidth =
-        std::max(
-            10,
-            static_cast<int>(
-                whiteWidth * 0.60
-            )
+        keys.push_back(
+            key
         );
-
-    int blackHeight =
-        static_cast<int>(
-            (bottom - top) * 0.60
-        );
-
-    for (int i = firstKey;
-         i <= lastKey;
-         ++i)
-    {
-        if (!keys[i].black)
-            continue;
-
-        // Find the white key immediately before this
-        // black key.
-        int previousWhite = -1;
-
-        for (int j = i - 1;
-             j >= firstKey;
-             --j)
-        {
-            if (!keys[j].black)
-            {
-                previousWhite = j;
-                break;
-            }
-        }
-
-        if (previousWhite == -1)
-            continue;
-
-        // The boundary between the two white keys is
-        // exactly where the black key belongs.
-        int boundary =
-            keys[previousWhite].rect.right;
-
-        keys[i].rect.left =
-            boundary -
-            blackWidth / 2;
-
-        keys[i].rect.right =
-            boundary +
-            blackWidth / 2;
-
-        keys[i].rect.top =
-            top;
-
-        keys[i].rect.bottom =
-            top +
-            blackHeight;
     }
 }
 
 // ============================================================
-// LAYOUT ALL 88 KEYS
-// ============================================================
-
-void LayoutPiano(
-    int width,
-    int height)
-{
-    if (keys.size() != NUM_KEYS)
-        return;
-
-    const int pianoTop = 155;
-    const int bottomMargin = 10;
-
-    int pianoBottom =
-        height - bottomMargin;
-
-    if (pianoBottom <= pianoTop)
-        return;
-
-    int totalHeight =
-        pianoBottom - pianoTop;
-
-    int rowHeight =
-        totalHeight / 2;
-
-    // 44 keys per row.
-    //
-    // Row 1:
-    // A0 through C4
-    //
-    // Row 2:
-    // C#4 through C8
-    //
-    // This is not ideal musically because the split occurs
-    // at C#4, so instead we use an exact 44/44 split.
-    //
-    // The black keys are still correctly placed relative to
-    // the neighboring white keys in each row.
-
-    LayoutRow(
-        0,
-        43,
-        pianoTop,
-        pianoTop + rowHeight,
-        width
-    );
-
-    LayoutRow(
-        44,
-        87,
-        pianoTop + rowHeight,
-        pianoBottom,
-        width
-    );
-}
-
-// ============================================================
-// FIND KEY
+// GET KEY AT MOUSE POSITION
 // ============================================================
 
 PianoKey* FindKeyAt(
     int x,
     int y)
 {
-    // Black keys first because they sit on top
-    // of the white keys.
+    // Check black keys first because
+    // they sit on top of white keys.
+
     for (PianoKey& key : keys)
     {
         if (!key.black)
@@ -517,7 +236,8 @@ PianoKey* FindKeyAt(
         }
     }
 
-    // Then white keys.
+    // Then check white keys.
+
     for (PianoKey& key : keys)
     {
         if (key.black)
@@ -535,133 +255,156 @@ PianoKey* FindKeyAt(
 }
 
 // ============================================================
-// WAVEFORM
+// WAVEFORM HELPERS
 // ============================================================
 
-double MakeWave(
-    double phase,
-    int instrument)
+double Sine(double phase)
 {
-    double sine =
-        std::sin(phase);
-
-    double saw =
-        2.0 *
-        (phase /
-         (2.0 * 3.14159265358979323846))
-        - 1.0;
-
-    double square =
-        sine >= 0.0
-        ? 1.0
-        : -1.0;
-
-    int family =
-        instrument / 8;
-
-    switch (family)
-    {
-        case 0:
-            // Piano
-            return
-                0.75 * sine +
-                0.18 * std::sin(phase * 2.0) +
-                0.07 * std::sin(phase * 3.0);
-
-        case 1:
-            // Bells/percussion
-            return
-                0.60 * sine +
-                0.25 * std::sin(phase * 3.0) +
-                0.15 * std::sin(phase * 5.0);
-
-        case 2:
-            // Organ
-            return
-                0.45 * sine +
-                0.25 * std::sin(phase * 2.0) +
-                0.18 * std::sin(phase * 3.0) +
-                0.12 * std::sin(phase * 4.0);
-
-        case 3:
-            // Guitar
-            return
-                0.65 * sine +
-                0.35 * saw;
-
-        case 4:
-            // Bass
-            return
-                0.80 * sine +
-                0.20 * std::sin(phase * 2.0);
-
-        case 5:
-            // Strings
-            return
-                0.60 * sine +
-                0.20 * std::sin(phase * 2.0) +
-                0.20 * std::sin(phase * 3.0);
-
-        case 6:
-            // Brass
-            return
-                0.40 * sine +
-                0.35 * saw +
-                0.25 * std::sin(phase * 3.0);
-
-        case 7:
-            // Woodwinds
-            return
-                0.70 * sine +
-                0.20 * std::sin(phase * 2.0) +
-                0.10 * std::sin(phase * 4.0);
-
-        case 8:
-            // Synth lead
-            return
-                0.50 * saw +
-                0.50 * square;
-
-        case 9:
-            // Pads
-            return
-                0.70 * sine +
-                0.15 * std::sin(phase * 2.0) +
-                0.15 * std::sin(phase * 4.0);
-
-        case 10:
-            // Effects
-            return
-                0.55 * sine +
-                0.25 * saw +
-                0.20 * std::sin(phase * 7.0);
-
-        case 11:
-            // Ethnic
-            return
-                0.55 * sine +
-                0.45 * saw;
-
-        case 12:
-            // Percussion
-            return
-                0.40 * sine +
-                0.60 * square;
-
-        default:
-            return
-                0.70 * sine +
-                0.30 * saw;
-    }
+    return std::sin(
+        2.0 * PI * phase
+    );
 }
 
 // ============================================================
-// PLAY SOUND
+// GENERATE INSTRUMENT SAMPLE
+// ============================================================
+
+double GenerateInstrumentSample(
+    Instrument instrument,
+    double frequency,
+    double t)
+{
+    double phase =
+        frequency * t;
+
+    double value = 0.0;
+
+    switch (instrument)
+    {
+        // ----------------------------------------------------
+        // PIANO
+        // ----------------------------------------------------
+
+        case Instrument::PIANO:
+        {
+            value =
+                0.85 * Sine(phase) +
+                0.30 * Sine(phase * 2.0) +
+                0.18 * Sine(phase * 3.0) +
+                0.10 * Sine(phase * 4.0);
+
+            break;
+        }
+
+        // ----------------------------------------------------
+        // FLUTE
+        // ----------------------------------------------------
+
+        case Instrument::FLUTE:
+        {
+            value =
+                0.92 * Sine(phase) +
+                0.08 * Sine(phase * 2.0);
+
+            break;
+        }
+
+        // ----------------------------------------------------
+        // ORGAN
+        // ----------------------------------------------------
+
+        case Instrument::ORGAN:
+        {
+            value =
+                0.55 * Sine(phase) +
+                0.35 * Sine(phase * 2.0) +
+                0.25 * Sine(phase * 3.0) +
+                0.18 * Sine(phase * 4.0) +
+                0.10 * Sine(phase * 6.0);
+
+            break;
+        }
+
+        // ----------------------------------------------------
+        // BELL
+        // ----------------------------------------------------
+
+        case Instrument::BELL:
+        {
+            value =
+                0.75 * Sine(phase) +
+                0.55 * Sine(phase * 2.01) +
+                0.35 * Sine(phase * 3.02) +
+                0.20 * Sine(phase * 4.17);
+
+            // Bell naturally fades faster.
+            value *=
+                std::exp(-3.5 * t);
+
+            break;
+        }
+
+        // ----------------------------------------------------
+        // STRINGS
+        // ----------------------------------------------------
+
+        case Instrument::STRINGS:
+        {
+            double vibrato =
+                0.003 *
+                std::sin(
+                    2.0 * PI * 5.0 * t
+                );
+
+            double stringPhase =
+                frequency *
+                (1.0 + vibrato) *
+                t;
+
+            value =
+                0.65 * Sine(stringPhase) +
+                0.30 * Sine(stringPhase * 2.0) +
+                0.15 * Sine(stringPhase * 3.0);
+
+            break;
+        }
+
+        // ----------------------------------------------------
+        // SYNTH
+        // ----------------------------------------------------
+
+        case Instrument::SYNTH:
+        {
+            // Saw-like waveform made from harmonics.
+
+            for (int harmonic = 1;
+                 harmonic <= 8;
+                 ++harmonic)
+            {
+                value +=
+                    (1.0 / harmonic) *
+                    Sine(
+                        phase *
+                        harmonic
+                    );
+            }
+
+            value *= 0.55;
+
+            break;
+        }
+    }
+
+    return value;
+}
+
+// ============================================================
+// PLAY NOTE SOUND
 // ============================================================
 
 void PlayNoteSound(
     double frequency,
-    int instrument)
+    Instrument instrument)
 {
     std::thread(
         [frequency, instrument]()
@@ -676,63 +419,58 @@ void PlayNoteSound(
                 sampleCount
             );
 
-            const double twoPi =
-                2.0 *
-                3.14159265358979323846;
-
             for (int i = 0;
                  i < sampleCount;
                  ++i)
             {
-                double time =
+                double t =
                     static_cast<double>(i) /
                     SAMPLE_RATE;
 
-                double phase =
-                    std::fmod(
-                        twoPi *
-                        frequency *
-                        time,
-                        twoPi
-                    );
+                double envelope = 1.0;
 
-                double attack =
-                    std::min(
-                        1.0,
-                        time / 0.015
-                    );
+                // Quick attack.
+                if (t < 0.015)
+                {
+                    envelope =
+                        t / 0.015;
+                }
 
-                double release =
-                    std::max(
-                        0.0,
-                        1.0 -
-                        time / NOTE_LENGTH
-                    );
+                // Release.
+                double releaseStart =
+                    NOTE_LENGTH * 0.65;
 
-                release *= release;
+                if (t > releaseStart)
+                {
+                    double remaining =
+                        NOTE_LENGTH - t;
+
+                    double releaseLength =
+                        NOTE_LENGTH -
+                        releaseStart;
+
+                    envelope *=
+                        remaining /
+                        releaseLength;
+                }
 
                 double value =
-                    MakeWave(
-                        phase,
-                        instrument
+                    GenerateInstrumentSample(
+                        instrument,
+                        frequency,
+                        t
                     );
 
                 value *=
-                    attack *
-                    release;
+                    envelope;
 
-                // 5X volume boost.
-                value *= VOLUME_BOOST;
+                // Requested 5X boost.
+                value *=
+                    VOLUME_BOOST;
 
-                // Prevent digital clipping.
+                // Soft clipping.
                 value =
-                    std::max(
-                        -1.0,
-                        std::min(
-                            1.0,
-                            value
-                        )
-                    );
+                    std::tanh(value);
 
                 samples[i] =
                     static_cast<short>(
@@ -776,7 +514,9 @@ void PlayNoteSound(
                 );
 
             if (result != MMSYSERR_NOERROR)
+            {
                 return;
+            }
 
             WAVEHDR header{};
 
@@ -798,7 +538,8 @@ void PlayNoteSound(
                     sizeof(header)
                 );
 
-            if (result == MMSYSERR_NOERROR)
+            if (result ==
+                MMSYSERR_NOERROR)
             {
                 result =
                     waveOutWrite(
@@ -807,14 +548,15 @@ void PlayNoteSound(
                         sizeof(header)
                     );
 
-                if (result == MMSYSERR_NOERROR)
+                if (result ==
+                    MMSYSERR_NOERROR)
                 {
-                    Sleep(
-                        static_cast<DWORD>(
-                            NOTE_LENGTH *
-                            1000.0
-                        )
-                    );
+                    while (
+                        !(header.dwFlags &
+                          WHDR_DONE))
+                    {
+                        Sleep(5);
+                    }
                 }
 
                 waveOutUnprepareHeader(
@@ -824,10 +566,6 @@ void PlayNoteSound(
                 );
             }
 
-            waveOutReset(
-                waveOut
-            );
-
             waveOutClose(
                 waveOut
             );
@@ -836,201 +574,95 @@ void PlayNoteSound(
 }
 
 // ============================================================
-// APPEND OUTPUT
-// ============================================================
-
-void AppendOutput(
-    const std::string& text)
-{
-    if (outputEditor == nullptr)
-        return;
-
-    int length =
-        GetWindowTextLengthA(
-            outputEditor
-        );
-
-    SendMessageA(
-        outputEditor,
-        EM_SETSEL,
-        length,
-        length
-    );
-
-    SendMessageA(
-        outputEditor,
-        EM_REPLACESEL,
-        FALSE,
-        reinterpret_cast<LPARAM>(
-            text.c_str()
-        )
-    );
-}
-
-// ============================================================
-// PRINT PLAYER COMMAND
-//
-// FORMAT:
-//
-// FLUTE D#2 0 1
-//
-// Instrument
-// Note
-// Start
-// End
+// PRINT NOTE
 // ============================================================
 
 void PrintNote(
     const PianoKey& key)
 {
-    std::ostringstream output;
-
-    output
-        << instrumentNames[selectedInstrument]
-        << " "
-        << GetNoteName(key.midiNote)
-        << " 0 1\r\n";
-
-    AppendOutput(
-        output.str()
-    );
-}
-
-// ============================================================
-// CLEAR
-// ============================================================
-
-void ClearOutput()
-{
-    if (outputEditor != nullptr)
-    {
-        SetWindowTextA(
-            outputEditor,
-            ""
-        );
-    }
-}
-
-// ============================================================
-// COPY
-// ============================================================
-
-void CopyOutput()
-{
     if (outputEditor == nullptr)
         return;
 
+    std::wstring instrument =
+        instrumentNames[
+            static_cast<int>(
+                currentInstrument
+            )
+        ];
+
+    // IMPORTANT:
+    //
+    // The format is:
+    //
+    // INSTRUMENT NOTE POSITION DURATION
+    //
+    // Example:
+    //
+    // FLUTE D#2 0 1
+    // FLUTE F2 1 1
+    // FLUTE A#2 2 1
+
+    std::wstringstream line;
+
+    line
+        << instrument
+        << L" "
+        << key.noteName
+        << L" "
+        << notePosition
+        << L" "
+        << L"1\r\n";
+
     int length =
-        GetWindowTextLengthA(
+        GetWindowTextLengthW(
             outputEditor
         );
 
-    if (length <= 0)
-        return;
+    std::wstring existing;
 
-    std::vector<char> buffer(
-        static_cast<size_t>(length) + 1
-    );
-
-    GetWindowTextA(
-        outputEditor,
-        buffer.data(),
-        length + 1
-    );
-
-    if (!OpenClipboard(mainWindow))
-        return;
-
-    EmptyClipboard();
-
-    HGLOBAL memory =
-        GlobalAlloc(
-            GMEM_MOVEABLE,
-            buffer.size()
+    if (length > 0)
+    {
+        existing.resize(
+            length
         );
 
-    if (memory != nullptr)
-    {
-        void* data =
-            GlobalLock(memory);
-
-        if (data != nullptr)
-        {
-            std::memcpy(
-                data,
-                buffer.data(),
-                buffer.size()
-            );
-
-            GlobalUnlock(
-                memory
-            );
-
-            SetClipboardData(
-                CF_TEXT,
-                memory
-            );
-        }
-        else
-        {
-            GlobalFree(
-                memory
-            );
-        }
+        GetWindowTextW(
+            outputEditor,
+            &existing[0],
+            length + 1
+        );
     }
 
-    CloseClipboard();
-}
+    existing +=
+        line.str();
 
-// ============================================================
-// UPDATE INSTRUMENT BUTTON
-// ============================================================
-
-void UpdateInstrumentButton()
-{
-    if (instrumentButton == nullptr)
-        return;
-
-    std::string text =
-        "Instrument: ";
-
-    text +=
-        instrumentNames[
-            selectedInstrument
-        ];
-
-    text +=
-        " (" +
-        std::to_string(
-            selectedInstrument + 1
-        ) +
-        "/128)";
-
-    SetWindowTextA(
-        instrumentButton,
-        text.c_str()
+    SetWindowTextW(
+        outputEditor,
+        existing.c_str()
     );
+
+    // Move to the newest note.
+    SendMessageW(
+        outputEditor,
+        EM_SETSEL,
+        static_cast<WPARAM>(
+            existing.length()
+        ),
+        static_cast<LPARAM>(
+            existing.length()
+        )
+    );
+
+    // Advance the position for
+    // the NEXT note.
+    ++notePosition;
 }
 
 // ============================================================
-// NEXT INSTRUMENT
+// RESIZE PIANO
 // ============================================================
 
-void NextInstrument()
-{
-    ++selectedInstrument;
-
-    if (selectedInstrument >= 128)
-        selectedInstrument = 0;
-
-    UpdateInstrumentButton();
-}
-
-// ============================================================
-// RESIZE
-// ============================================================
-
-void ResizeControls()
+void ResizePiano()
 {
     if (mainWindow == nullptr)
         return;
@@ -1043,93 +675,179 @@ void ResizeControls()
     );
 
     int width =
-        rect.right - rect.left;
+        rect.right;
+
+    int height =
+        rect.bottom;
+
+    // Piano starts below the controls.
+    int pianoTop = 165;
+
+    int pianoHeight =
+        height - pianoTop - 15;
+
+    if (pianoHeight < 100)
+        pianoHeight = 100;
+
+    int rowHeight =
+        pianoHeight / 2;
 
     // --------------------------------------------------------
-    // Instrument
+    // Two rows of 44 keys.
     // --------------------------------------------------------
 
-    if (instrumentButton != nullptr)
+    for (size_t i = 0;
+         i < keys.size();
+         ++i)
     {
-        MoveWindow(
-            instrumentButton,
-            10,
-            10,
+        PianoKey& key =
+            keys[i];
+
+        int row =
+            static_cast<int>(
+                i / 44
+            );
+
+        int rowStart =
+            row * 44;
+
+        int rowEnd =
+            std::min(
+                rowStart + 44,
+                static_cast<int>(
+                    keys.size()
+                )
+            );
+
+        // Count white keys in this row.
+        int whiteCount = 0;
+
+        for (int j = rowStart;
+             j < rowEnd;
+             ++j)
+        {
+            if (!keys[j].black)
+                ++whiteCount;
+        }
+
+        if (whiteCount <= 0)
+            continue;
+
+        int whiteWidth =
             std::max(
-                250,
-                width - 240
-            ),
-            35,
-            TRUE
-        );
+                1,
+                width / whiteCount
+            );
+
+        // Determine the white-key index
+        // of this key within its row.
+        int whiteIndex = 0;
+
+        for (int j = rowStart;
+             j < static_cast<int>(i);
+             ++j)
+        {
+            if (!keys[j].black)
+                ++whiteIndex;
+        }
+
+        int top =
+            pianoTop +
+            row * rowHeight;
+
+        int bottom =
+            top + rowHeight;
+
+        if (!key.black)
+        {
+            int left =
+                whiteIndex *
+                whiteWidth;
+
+            int right =
+                (whiteIndex + 1) *
+                whiteWidth;
+
+            // Make final key reach the edge.
+            if (whiteIndex ==
+                whiteCount - 1)
+            {
+                right = width;
+            }
+
+            key.rect =
+            {
+                left,
+                top,
+                right,
+                bottom
+            };
+        }
+        else
+        {
+            // Black keys are positioned between
+            // their neighboring white keys.
+
+            int note =
+                key.midiNote % 12;
+
+            int previousWhiteIndex =
+                whiteIndex - 1;
+
+            // For black keys, whiteIndex is
+            // the number of whites before it.
+            //
+            // Place it centered at the boundary.
+
+            double center =
+                static_cast<double>(
+                    whiteIndex *
+                    whiteWidth
+                );
+
+            int blackWidth =
+                std::max(
+                    8,
+                    whiteWidth * 58 / 100
+                );
+
+            int left =
+                static_cast<int>(
+                    center -
+                    blackWidth / 2.0
+                );
+
+            int right =
+                left +
+                blackWidth;
+
+            int blackHeight =
+                rowHeight * 58 / 100;
+
+            // Keep inside row.
+            if (left < 0)
+                left = 0;
+
+            if (right > width)
+                right = width;
+
+            key.rect =
+            {
+                left,
+                top,
+                right,
+                top + blackHeight
+            };
+
+            (void)previousWhiteIndex;
+            (void)note;
+        }
     }
-
-    // --------------------------------------------------------
-    // Clear
-    // --------------------------------------------------------
-
-    if (clearButton != nullptr)
-    {
-        MoveWindow(
-            clearButton,
-            std::max(
-                10,
-                width - 220
-            ),
-            10,
-            100,
-            35,
-            TRUE
-        );
-    }
-
-    // --------------------------------------------------------
-    // Copy
-    // --------------------------------------------------------
-
-    if (copyButton != nullptr)
-    {
-        MoveWindow(
-            copyButton,
-            std::max(
-                10,
-                width - 110
-            ),
-            10,
-            100,
-            35,
-            TRUE
-        );
-    }
-
-    // --------------------------------------------------------
-    // Output
-    // --------------------------------------------------------
-
-    if (outputEditor != nullptr)
-    {
-        MoveWindow(
-            outputEditor,
-            10,
-            50,
-            std::max(
-                300,
-                width - 20
-            ),
-            95,
-            TRUE
-        );
-    }
-
-    LayoutPiano(
-        width,
-        rect.bottom
-    );
 
     InvalidateRect(
         mainWindow,
         nullptr,
-        TRUE
+        FALSE
     );
 }
 
@@ -1140,45 +858,17 @@ void ResizeControls()
 void DrawPiano(
     HDC hdc)
 {
-    RECT client{};
-
-    GetClientRect(
-        mainWindow,
-        &client
-    );
-
-    HBRUSH background =
-        CreateSolidBrush(
-            RGB(35, 35, 40)
-        );
-
-    FillRect(
-        hdc,
-        &client,
-        background
-    );
-
-    DeleteObject(
-        background
-    );
-
-    // --------------------------------------------------------
-    // White keys
-    // --------------------------------------------------------
-
-    for (const PianoKey& key : keys)
+    // White keys first.
+    for (PianoKey& key : keys)
     {
         if (key.black)
             continue;
 
-        COLORREF color =
-            key.pressed
-            ? RGB(90, 175, 255)
-            : RGB(245, 245, 245);
-
         HBRUSH brush =
             CreateSolidBrush(
-                color
+                key.pressed
+                    ? RGB(180, 220, 255)
+                    : RGB(250, 250, 250)
             );
 
         FillRect(
@@ -1200,88 +890,205 @@ void DrawPiano(
                 )
             )
         );
-    }
 
-    // --------------------------------------------------------
-    // Black keys
-    // --------------------------------------------------------
-
-    for (const PianoKey& key : keys)
-    {
-        if (!key.black)
-            continue;
-
-        COLORREF color =
-            key.pressed
-            ? RGB(40, 120, 230)
-            : RGB(10, 10, 12);
-
-        HBRUSH brush =
-            CreateSolidBrush(
-                color
-            );
-
-        FillRect(
+        // Note name at bottom.
+        SetBkMode(
             hdc,
-            &key.rect,
-            brush
+            TRANSPARENT
         );
 
-        DeleteObject(
-            brush
-        );
-
-        FrameRect(
+        SetTextColor(
             hdc,
-            &key.rect,
-            static_cast<HBRUSH>(
-                GetStockObject(
-                    BLACK_BRUSH
-                )
-            )
+            RGB(30, 30, 30)
         );
-    }
-
-    // --------------------------------------------------------
-    // MIDI numbers
-    // --------------------------------------------------------
-
-    SetBkMode(
-        hdc,
-        TRANSPARENT
-    );
-
-    SetTextColor(
-        hdc,
-        RGB(50, 50, 50)
-    );
-
-    for (const PianoKey& key : keys)
-    {
-        if (key.black)
-            continue;
 
         RECT textRect =
             key.rect;
 
-        textRect.top =
-            textRect.bottom - 25;
+        textRect.top +=
+            (textRect.bottom -
+             textRect.top) - 25;
 
-        std::string number =
-            std::to_string(
-                key.midiNote
-            );
-
-        DrawTextA(
+        DrawTextW(
             hdc,
-            number.c_str(),
+            key.noteName.c_str(),
             -1,
             &textRect,
             DT_CENTER |
             DT_SINGLELINE |
-            DT_BOTTOM
+            DT_VCENTER
         );
     }
+
+    // Black keys second so they appear
+    // on top of white keys.
+    for (PianoKey& key : keys)
+    {
+        if (!key.black)
+            continue;
+
+        HBRUSH brush =
+            CreateSolidBrush(
+                key.pressed
+                    ? RGB(60, 100, 150)
+                    : RGB(25, 25, 25)
+            );
+
+        FillRect(
+            hdc,
+            &key.rect,
+            brush
+        );
+
+        DeleteObject(
+            brush
+        );
+
+        FrameRect(
+            hdc,
+            &key.rect,
+            static_cast<HBRUSH>(
+                GetStockObject(
+                    BLACK_BRUSH
+                )
+            )
+        );
+    }
+}
+
+// ============================================================
+// UPDATE INSTRUMENT BUTTON
+// ============================================================
+
+void UpdateInstrumentButton()
+{
+    if (instrumentButton == nullptr)
+        return;
+
+    std::wstring text =
+        L"Instrument: ";
+
+    text +=
+        instrumentNames[
+            static_cast<int>(
+                currentInstrument
+            )
+        ];
+
+    SetWindowTextW(
+        instrumentButton,
+        text.c_str()
+    );
+}
+
+// ============================================================
+// CLEAR OUTPUT
+// ============================================================
+
+void ClearOutput()
+{
+    notePosition = 0;
+
+    if (outputEditor != nullptr)
+    {
+        SetWindowTextW(
+            outputEditor,
+            L""
+        );
+    }
+
+    for (PianoKey& key : keys)
+    {
+        key.pressed = false;
+    }
+
+    InvalidateRect(
+        mainWindow,
+        nullptr,
+        FALSE
+    );
+}
+
+// ============================================================
+// COPY OUTPUT
+// ============================================================
+
+void CopyOutput()
+{
+    if (outputEditor == nullptr)
+        return;
+
+    int length =
+        GetWindowTextLengthW(
+            outputEditor
+        );
+
+    if (length <= 0)
+        return;
+
+    std::wstring text;
+
+    text.resize(
+        length
+    );
+
+    GetWindowTextW(
+        outputEditor,
+        &text[0],
+        length + 1
+    );
+
+    if (!OpenClipboard(
+            mainWindow))
+    {
+        return;
+    }
+
+    EmptyClipboard();
+
+    SIZE_T bytes =
+        (text.size() + 1) *
+        sizeof(wchar_t);
+
+    HGLOBAL memory =
+        GlobalAlloc(
+            GMEM_MOVEABLE,
+            bytes
+        );
+
+    if (memory != nullptr)
+    {
+        void* data =
+            GlobalLock(
+                memory
+            );
+
+        if (data != nullptr)
+        {
+            memcpy(
+                data,
+                text.c_str(),
+                bytes
+            );
+
+            GlobalUnlock(
+                memory
+            );
+
+            SetClipboardData(
+                CF_UNICODETEXT,
+                memory
+            );
+        }
+        else
+        {
+            GlobalFree(
+                memory
+            );
+        }
+    }
+
+    CloseClipboard();
 }
 
 // ============================================================
@@ -1306,116 +1113,155 @@ LRESULT CALLBACK WindowProc(
                 window;
 
             instrumentButton =
-                CreateWindowA(
-                    "BUTTON",
-                    "Instrument",
+                CreateWindowW(
+                    L"BUTTON",
+                    L"Instrument: FLUTE",
                     WS_CHILD |
                     WS_VISIBLE |
                     BS_PUSHBUTTON,
-                    10,
-                    10,
-                    700,
+                    15,
+                    75,
+                    220,
                     35,
                     window,
-                    reinterpret_cast<HMENU>(1001),
-                    GetModuleHandle(nullptr),
+                    reinterpret_cast<HMENU>(
+                        1001
+                    ),
+                    GetModuleHandleW(
+                        nullptr
+                    ),
                     nullptr
                 );
 
             clearButton =
-                CreateWindowA(
-                    "BUTTON",
-                    "Clear",
+                CreateWindowW(
+                    L"BUTTON",
+                    L"Clear",
                     WS_CHILD |
                     WS_VISIBLE |
                     BS_PUSHBUTTON,
-                    720,
-                    10,
+                    245,
+                    75,
                     100,
                     35,
                     window,
-                    reinterpret_cast<HMENU>(1002),
-                    GetModuleHandle(nullptr),
+                    reinterpret_cast<HMENU>(
+                        1002
+                    ),
+                    GetModuleHandleW(
+                        nullptr
+                    ),
                     nullptr
                 );
 
             copyButton =
-                CreateWindowA(
-                    "BUTTON",
-                    "Copy",
+                CreateWindowW(
+                    L"BUTTON",
+                    L"Copy",
                     WS_CHILD |
                     WS_VISIBLE |
                     BS_PUSHBUTTON,
-                    830,
-                    10,
+                    355,
+                    75,
                     100,
                     35,
                     window,
-                    reinterpret_cast<HMENU>(1003),
-                    GetModuleHandle(nullptr),
+                    reinterpret_cast<HMENU>(
+                        1003
+                    ),
+                    GetModuleHandleW(
+                        nullptr
+                    ),
                     nullptr
                 );
 
             outputEditor =
-                CreateWindowExA(
+                CreateWindowExW(
                     WS_EX_CLIENTEDGE,
-                    "EDIT",
-                    "",
+                    L"EDIT",
+                    L"",
                     WS_CHILD |
                     WS_VISIBLE |
-                    WS_VSCROLL |
                     ES_MULTILINE |
                     ES_AUTOVSCROLL |
-                    ES_READONLY,
-                    10,
-                    50,
-                    900,
-                    95,
+                    ES_AUTOHSCROLL |
+                    WS_VSCROLL |
+                    WS_HSCROLL,
+                    470,
+                    70,
+                    400,
+                    75,
                     window,
-                    reinterpret_cast<HMENU>(1004),
-                    GetModuleHandle(nullptr),
+                    reinterpret_cast<HMENU>(
+                        1004
+                    ),
+                    GetModuleHandleW(
+                        nullptr
+                    ),
                     nullptr
                 );
 
-            UpdateInstrumentButton();
+            SendMessageW(
+                outputEditor,
+                WM_SETFONT,
+                reinterpret_cast<WPARAM>(
+                    GetStockObject(
+                        DEFAULT_GUI_FONT
+                    )
+                ),
+                TRUE
+            );
 
             return 0;
         }
 
         // ====================================================
-        // RESIZE
-        // ====================================================
-
-        case WM_SIZE:
-        {
-            ResizeControls();
-            return 0;
-        }
-
-        // ====================================================
-        // BUTTONS
+        // BUTTON
         // ====================================================
 
         case WM_COMMAND:
         {
-            int id =
+            int controlID =
                 LOWORD(wParam);
 
-            if (id == 1001)
+            if (controlID == 1001)
             {
-                NextInstrument();
+                int instrument =
+                    static_cast<int>(
+                        currentInstrument
+                    );
+
+                ++instrument;
+
+                if (instrument >=
+                    static_cast<int>(
+                        instrumentNames.size()
+                    ))
+                {
+                    instrument = 0;
+                }
+
+                currentInstrument =
+                    static_cast<Instrument>(
+                        instrument
+                    );
+
+                UpdateInstrumentButton();
+
                 return 0;
             }
 
-            if (id == 1002)
+            if (controlID == 1002)
             {
                 ClearOutput();
+
                 return 0;
             }
 
-            if (id == 1003)
+            if (controlID == 1003)
             {
                 CopyOutput();
+
                 return 0;
             }
 
@@ -1423,7 +1269,7 @@ LRESULT CALLBACK WindowProc(
         }
 
         // ====================================================
-        // LEFT BUTTON DOWN
+        // LEFT MOUSE
         // ====================================================
 
         case WM_LBUTTONDOWN:
@@ -1450,22 +1296,25 @@ LRESULT CALLBACK WindowProc(
 
             if (key != nullptr)
             {
-                for (PianoKey& current : keys)
-                    current.pressed = false;
+                for (PianoKey& current :
+                     keys)
+                {
+                    current.pressed =
+                        false;
+                }
 
-                key->pressed = true;
+                key->pressed =
+                    true;
 
+                // Play the note.
                 PlayNoteSound(
                     key->frequency,
-                    selectedInstrument
+                    currentInstrument
                 );
 
+                // Print the note.
                 PrintNote(
                     *key
-                );
-
-                SetCapture(
-                    window
                 );
 
                 InvalidateRect(
@@ -1474,6 +1323,10 @@ LRESULT CALLBACK WindowProc(
                     FALSE
                 );
             }
+
+            SetCapture(
+                window
+            );
 
             return 0;
         }
@@ -1484,12 +1337,6 @@ LRESULT CALLBACK WindowProc(
 
         case WM_MOUSEMOVE:
         {
-            bool leftButtonDown =
-                (wParam & MK_LBUTTON) != 0;
-
-            if (!leftButtonDown)
-                return 0;
-
             int x =
                 static_cast<int>(
                     static_cast<short>(
@@ -1504,55 +1351,86 @@ LRESULT CALLBACK WindowProc(
                     )
                 );
 
-            PianoKey* key =
-                FindKeyAt(
-                    x,
-                    y
-                );
+            bool leftButtonDown =
+                (wParam & MK_LBUTTON) != 0;
 
-            if (key != nullptr &&
-                !key->pressed)
+            if (leftButtonDown)
             {
-                for (PianoKey& current : keys)
-                    current.pressed = false;
+                PianoKey* key =
+                    FindKeyAt(
+                        x,
+                        y
+                    );
 
-                key->pressed = true;
+                if (key != nullptr)
+                {
+                    // Only trigger when moving
+                    // onto a different key.
 
-                PlayNoteSound(
-                    key->frequency,
-                    selectedInstrument
-                );
+                    if (!key->pressed)
+                    {
+                        for (PianoKey& current :
+                             keys)
+                        {
+                            current.pressed =
+                                false;
+                        }
 
-                PrintNote(
-                    *key
-                );
+                        key->pressed =
+                            true;
 
-                InvalidateRect(
-                    window,
-                    nullptr,
-                    FALSE
-                );
+                        PlayNoteSound(
+                            key->frequency,
+                            currentInstrument
+                        );
+
+                        PrintNote(
+                            *key
+                        );
+
+                        InvalidateRect(
+                            window,
+                            nullptr,
+                            FALSE
+                        );
+                    }
+                }
             }
 
             return 0;
         }
 
         // ====================================================
-        // LEFT BUTTON UP
+        // LEFT MOUSE UP
         // ====================================================
 
         case WM_LBUTTONUP:
         {
-            for (PianoKey& key : keys)
-                key.pressed = false;
-
             ReleaseCapture();
+
+            for (PianoKey& key :
+                 keys)
+            {
+                key.pressed =
+                    false;
+            }
 
             InvalidateRect(
                 window,
                 nullptr,
                 FALSE
             );
+
+            return 0;
+        }
+
+        // ====================================================
+        // RESIZE
+        // ====================================================
+
+        case WM_SIZE:
+        {
+            ResizePiano();
 
             return 0;
         }
@@ -1571,6 +1449,84 @@ LRESULT CALLBACK WindowProc(
                     &ps
                 );
 
+            RECT client{};
+
+            GetClientRect(
+                window,
+                &client
+            );
+
+            HBRUSH background =
+                CreateSolidBrush(
+                    RGB(35, 35, 35)
+                );
+
+            FillRect(
+                hdc,
+                &client,
+                background
+            );
+
+            DeleteObject(
+                background
+            );
+
+            // Title.
+            SetBkMode(
+                hdc,
+                TRANSPARENT
+            );
+
+            SetTextColor(
+                hdc,
+                RGB(255, 255, 255)
+            );
+
+            RECT titleRect =
+            {
+                15,
+                15,
+                client.right - 15,
+                55
+            };
+
+            DrawTextW(
+                hdc,
+                L"88-Key Music Code Piano",
+                -1,
+                &titleRect,
+                DT_LEFT |
+                DT_SINGLELINE |
+                DT_VCENTER
+            );
+
+            // Small information text.
+            RECT infoRect =
+            {
+                15,
+                50,
+                client.right - 15,
+                70
+            };
+
+            std::wstring info =
+                L"Click or drag across the keys to play and print notes";
+
+            SetTextColor(
+                hdc,
+                RGB(190, 190, 190)
+            );
+
+            DrawTextW(
+                hdc,
+                info.c_str(),
+                -1,
+                &infoRect,
+                DT_LEFT |
+                DT_SINGLELINE |
+                DT_VCENTER
+            );
+
             DrawPiano(
                 hdc
             );
@@ -1584,17 +1540,20 @@ LRESULT CALLBACK WindowProc(
         }
 
         // ====================================================
-        // DESTROY
+        // CLOSE
         // ====================================================
 
         case WM_DESTROY:
         {
-            PostQuitMessage(0);
+            PostQuitMessage(
+                0
+            );
+
             return 0;
         }
     }
 
-    return DefWindowProc(
+    return DefWindowProcW(
         window,
         message,
         wParam,
@@ -1603,7 +1562,7 @@ LRESULT CALLBACK WindowProc(
 }
 
 // ============================================================
-// PROGRAM ENTRY
+// MAIN
 // ============================================================
 
 int WINAPI WinMain(
@@ -1612,12 +1571,10 @@ int WINAPI WinMain(
     LPSTR,
     int nCmdShow)
 {
-    CreatePiano();
+    const wchar_t CLASS_NAME[] =
+        L"MusicCodePianoWindow";
 
-    const char CLASS_NAME[] =
-        "PrintablePiano88";
-
-    WNDCLASSA wc{};
+    WNDCLASSW wc{};
 
     wc.lpfnWndProc =
         WindowProc;
@@ -1629,7 +1586,7 @@ int WINAPI WinMain(
         CLASS_NAME;
 
     wc.hCursor =
-        LoadCursor(
+        LoadCursorW(
             nullptr,
             IDC_ARROW
         );
@@ -1639,74 +1596,75 @@ int WINAPI WinMain(
             COLOR_WINDOW + 1
         );
 
-    if (!RegisterClassA(&wc))
+    if (!RegisterClassW(
+            &wc))
     {
-        MessageBoxA(
+        MessageBoxW(
             nullptr,
-            "Failed to register window class.",
-            "Error",
+            L"Could not register the window class.",
+            L"Error",
             MB_ICONERROR
         );
 
         return 1;
     }
 
-    HWND window =
-        CreateWindowExA(
+    CreateKeys();
+
+    mainWindow =
+        CreateWindowExW(
             0,
             CLASS_NAME,
-            "88-Key Music Player Code Keyboard",
+            L"88-Key Music Code Piano",
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            1100,
-            750,
+            1200,
+            700,
             nullptr,
             nullptr,
             hInstance,
             nullptr
         );
 
-    if (window == nullptr)
+    if (mainWindow == nullptr)
     {
-        MessageBoxA(
+        MessageBoxW(
             nullptr,
-            "Failed to create window.",
-            "Error",
+            L"Could not create the window.",
+            L"Error",
             MB_ICONERROR
         );
 
         return 1;
     }
 
-    mainWindow =
-        window;
-
     ShowWindow(
-        window,
+        mainWindow,
         nCmdShow
     );
 
     UpdateWindow(
-        window
+        mainWindow
     );
+
+    ResizePiano();
 
     MSG msg{};
 
     while (
-        GetMessage(
+        GetMessageW(
             &msg,
             nullptr,
             0,
             0
-        ) > 0
-    )
+        ) > 0)
     {
         TranslateMessage(
             &msg
         );
 
-        DispatchMessage(
+        DispatchMessageW(
             &msg
         );
     }
