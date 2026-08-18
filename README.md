@@ -1,1 +1,1 @@
-g++ "main.cpp" -o "C++Audio.exe" -mwindows -lwinmm -lgdi32 -lcomctl32
+g++ Main.cpp -o PianoRoll.exe -municode -mwindows -lwinmm -lgdi32
